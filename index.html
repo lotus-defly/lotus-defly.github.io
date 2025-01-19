@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Set canvas size to fullscreen
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    // Call resizeCanvas initially and on window resize
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    const balls = [];
+    const aiSize = 9;
+    const ballRadius = aiSize-2;
+    const aiSpeed = 1.1;
+    const safeDistance = 37;
+    const pressureDistance = safeDistance*3.5;
+    const aiAvoidanceDistance = safeDistance;
+    const towerRadius = aiSize-0.01;
+    const wallThickness = towerRadius-0.5;
+    const tacticalRetreatDistance = 70;
+
+    class Tower {
+      constructor(x, y, team) {
+        this.x = x;
+        this.y = y;
+        this.team = team;
+        this.connections = [];
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, towerRadius, 0, Math.PI * 2);
+        ctx.fillStyle = this.team === 'left' ? "rgb(255, 72, 55)" : "rgb(53, 89, 229)";
+        ctx.fill();
+        ctx.closePath();
+      }
+
+      connect(otherTower) {
+        if (!this.connections.includes(otherTower) && !otherTower.connections.includes(this)) {
+          this.connections.push(otherTower);
+          otherTower.connections.push(this);
+        }
+      }
+
+      disconnect(otherTower) {
+        this.connections = this.connections.filter(t => t !== otherTower);
+        otherTower.connections = otherTower.connections.filter(t => t !== this);
+      }
+    }
+
+    class AI {
+      constructor(x, y, team) {
+        // const this.id = Math.random();
+        this.id = AI.generateUniqueId();
+        this.x = x;
+        this.y = y;
+        this.team = team;
+        this.intervalId = null;
+        this.target = null;
+        this.edgeMovement = null;
+        this.lastTowerTouch = null;
+      }
+      static generateUniqueId() {
+        return Math.random();
+      }
+      startShooting() {
+        this.intervalId = setInterval(() => {
+          this.updateTarget();
+          if (this.target) {
+            let angle = Math.atan2(this.target.y - this.y, this.target.x - this.x) - (variation / 2.0) + Math.random() * variation;
+            const ball = {
+              x: this.x,
+              y: this.y,
+              dx: Math.cos(angle) * speed,
+              dy: Math.sin(angle) * speed,
+              team: this.team,
+              life: 300
+            };
+            balls.push(ball);
+          }
+        }, interval);
+      }
+
+      stopShooting() {
+        if (this.intervalId !== null) {
+          clearInterval(this.intervalId);
+          this.intervalId = null;
+        }
+      }
+
+      updateTarget() {
+        let nearestOpponent = null;
+        let minDistance = Infinity;
+        
+        for (const ai of aiPlayers) {
+          if (ai.team !== this.team) {
+            const distance = this.distanceTo(ai);
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestOpponent = ai;
+            }
+          }
+        }
+        if (humanPlayer.team !== this.team && humanPlayer.alive) {
+          const distance = this.distanceTo(humanPlayer);
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestOpponent = humanPlayer;
+          }
+        }
+        this.target = nearestOpponent;
+        return nearestOpponent;
+      }
+
+      move() {
+        this.updateTarget();
+        const nearestBall = this.findNearestBall();
+        const nearestTower = this.findNearestTower();
+        
+        let moveAngle;
+        let shouldMove = true;
+        
+        let newX = this.x;
+        let newY = this.y;
+
+        const nearbyAI = this.findNearbyAI();
+        // Try to build a tower
+        if (this.canBuildTower()) {
+          this.buildTower();
+        }
+
+        if (nearestTower && this.distanceTo(nearestTower) < towerRadius + aiSize) {
+          if (this.lastTowerTouch && this.lastTowerTouch !== nearestTower) {
+            nearestTower.connect(this.lastTowerTouch);
+            this.lastTowerTouch = null;
+          } else {
+            this.lastTowerTouch = nearestTower;
+          }
+        }
+
+        if (nearestBall && this.distanceTo(nearestBall) < safeDistance) {
+          const angleAwayFromBall = Math.atan2(this.y - nearestBall.y, this.x - nearestBall.x);
+          moveAngle = angleAwayFromBall;
+        } else if (nearbyAI) {
+          const angleAwayFromAI = Math.atan2(this.y - nearbyAI.y, this.x - nearbyAI.x);
+          moveAngle = angleAwayFromAI;
+        } else if (this.countEnemyAI(tacticalRetreatDistance) > 2) {
+          const angleAwayFromAI = Math.atan2(this.y - this.updateTarget().y, this.x - this.updateTarget().x);
+          moveAngle = angleAwayFromAI;
+        } else if (this.target && this.distanceTo(this.target) > pressureDistance) {
+          moveAngle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+        } else if (this.target) {
+          moveAngle = Math.atan2(this.target.y - this.y, this.target.x - this.x)+180;
+        } else {
+          shouldMove = false;
+        }
+        if (shouldMove) {
+          let newX = this.x + Math.cos(moveAngle) * aiSpeed;
+          let newY = this.y + Math.sin(moveAngle) * aiSpeed;
+    
+          // Check if the new position is blocked by an enemy tower or wall
+          if (!this.isPositionBlocked(newX, newY)) {
+            // Handle edge cases
+            if (newX <= aiSize || newX >= canvas.width - aiSize) {
+              this.edgeMovement = 'vertical';
+              newX = Math.max(aiSize, Math.min(canvas.width - aiSize, newX));
+            } else if (newY <= aiSize || newY >= canvas.height - aiSize) {
+              this.edgeMovement = 'horizontal';
+              newY = Math.max(aiSize, Math.min(canvas.height - aiSize, newY));
+            } else {
+              this.edgeMovement = null;
+            }
+    
+            this.x = newX;
+            this.y = newY;
+          }
+        }
+      }
+    
+      isPositionBlocked(x, y) {
+        for (const tower of towers) {
+          if (tower.team !== this.team) {
+            // Check if the AI is too close to an enemy tower
+            if (this.distanceTo({x: tower.x, y: tower.y}) < towerRadius + aiSize) {
+              return true;
+            }
+    
+            for (const connectedTower of tower.connections) {
+              if (connectedTower.team !== this.team) {
+                // Check if the AI is too close to a wall
+                if (this.distanceToLineSegment(tower, connectedTower, {x, y}) < wallThickness + aiSize) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+        return false;
+      }
+    
+      distanceToLineSegment(tower1, tower2, point) {
+        const x1 = tower1.x, y1 = tower1.y;
+        const x2 = tower2.x, y2 = tower2.y;
+        const px = point.x, py = point.y;
+    
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+    
+        const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+    
+        const clampedT = Math.max(0, Math.min(1, t));
+    
+        const closestX = x1 + clampedT * dx;
+        const closestY = y1 + clampedT * dy;
+    
+        return Math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY));
+      }
+
+      isPositionBlocked(x, y) {
+        for (const tower of towers) {
+          // Only check connections from opposing team towers
+          if (tower.team !== this.team) {
+            for (const connectedTower of tower.connections) {
+              // Check the connection only if it's also from the opposing team
+              if (connectedTower.team !== this.team) {
+                // Check if the position is blocked by the wall between the two towers
+                if (this.distanceToLineSegment(tower, connectedTower, {x, y}) < wallThickness) {
+                  // return true; // Blocked if the position is within the wall thickness
+                }
+              }
+            }
+          }
+        }
+        return false; // Not blocked if no close walls from the opposing team are found
+      }
+      canBuildTower() {
+        for (const tower of towers) {
+          if (this.distanceTo({x: tower.x, y: tower.y}) < safeDistance) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      buildTower() {
+        const tower = new Tower(this.x, this.y, this.team);
+        towers.push(tower);
+        this.lastTowerBuildTime = Date.now();
+      }
+
+      findNearestBall() {
+        let nearestBall = null;
+        let minDistance = Infinity;
+        
+        for (const ball of balls) {
+          if (ball.team !== this.team) {
+            const distance = this.distanceTo(ball);
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestBall = ball;
+            }
+          }
+        }
+        
+        return nearestBall;
+      }
+
+      findNearbyAI() {
+        let nearestAI = null;
+        let minDistance = Infinity;
+        for (const ai of aiPlayers) {
+          if (ai !== this && ai.team === this.team) {
+            const distance = this.distanceTo(ai);
+            if (distance < aiAvoidanceDistance && distance < minDistance) {
+              minDistance = distance;
+              nearestAI = ai;
+            }
+          }
+        }
+        
+        return nearestAI;
+      }
+      countEnemyAI(countDistance) {
+        let count = 0;
+        for (const ai of aiPlayers) {
+          if (ai !== this && ai.team !== this.team && this.distanceTo(ai) < countDistance) {
+            count++;
+          }
+        }
+        
+        return count;
+      }
+
+      findNearestTower() {
+        let nearestTower = null;
+        let minDistance = Infinity;
+        for (const tower of towers) {
+          const distance = this.distanceTo(tower);
+          if (distance < minDistance && tower.team == this.team) {
+            minDistance = distance;
+            nearestTower = tower;
+          }
+        }
+        return nearestTower;
+      }
+
+      distanceTo(object) {
+        return Math.sqrt((this.x - object.x) ** 2 + (this.y - object.y) ** 2);
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, aiSize, 0, Math.PI * 2);
+        ctx.fillStyle = this.team === 'left' ? "brown" : "CornflowerBlue";
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+class HumanPlayer {
+  constructor(x, y, team) {
+    this.x = x;
+    this.y = y;
+    this.team = team;
+    this.isBuilding = false;
+    this.target = null;
+    this.isShooting = false;
+    this.lastShotTime = 0;
+    this.shootingInterval = 500; // Time in milliseconds between shots
+    this.alive=true;
+    this.lastTowerTouch = null;
+  }
+
+  move() {
+    let dx = 0;
+    let dy = 0;
+
+    if (keys["KeyW"] && keys["KeyA"]) {
+      dy -= aiSpeed * Math.sqrt(2) / 2;
+      dx -= aiSpeed * Math.sqrt(2) / 2;
+    } else if (keys["KeyW"] && keys["KeyD"]) {
+      dy -= aiSpeed * Math.sqrt(2) / 2;
+      dx += aiSpeed * Math.sqrt(2) / 2;
+    } else if (keys["KeyA"] && keys["KeyS"]) {
+      dy += aiSpeed * Math.sqrt(2) / 2;
+      dx -= aiSpeed * Math.sqrt(2) / 2;
+    } else if (keys["KeyS"] && keys["KeyD"]) {
+      dy += aiSpeed * Math.sqrt(2) / 2;
+      dx += aiSpeed * Math.sqrt(2) / 2;
+    } else if (keys["KeyW"] || keys["ArrowUp"]) {
+      dy -= aiSpeed;
+    } else if (keys["KeyS"] || keys["ArrowDown"]) {
+      dy += aiSpeed;
+    } else if (keys["KeyA"] || keys["ArrowLeft"]) {
+      dx -= aiSpeed;
+    } else if (keys["KeyD"] || keys["ArrowRight"]) {
+      dx += aiSpeed;
+    }
+    const nearestTower = this.findNearestTower();
+
+    if (nearestTower && this.distanceTo(nearestTower) < towerRadius + aiSize) {
+      if (this.lastTowerTouch && this.lastTowerTouch !== nearestTower) {
+        nearestTower.connect(this.lastTowerTouch);
+        this.lastTowerTouch = null;
+      } else {
+        this.lastTowerTouch = nearestTower;
+      }
+    }
+    let newX = this.x + dx;
+    let newY = this.y + dy;
+    if (!this.isPositionBlocked(newX, newY)) {
+        // Boundary check
+        this.x = Math.max(aiSize, Math.min(canvas.width - aiSize, newX));
+        this.y = Math.max(aiSize, Math.min(canvas.height - aiSize, newY));
+      }
+    }
+  canBuildTower() {
+    for (const tower of towers) {
+      if (this.distanceTo({x: tower.x, y: tower.y}) < safeDistance) {
+        return false;
+      }
+    }
+    return true;
+  }
+  buildTower() {
+    const tower = new Tower(this.x, this.y, this.team);
+    towers.push(tower);
+  }
+
+  isPositionBlocked(x, y) {
+    for (const tower of towers) {
+      if (tower.team !== this.team) {
+        // Check if the player is too close to an enemy tower
+        if (this.distanceTo({x: tower.x, y: tower.y}) < towerRadius + aiSize) {
+          return true;
+        }
+
+        for (const connectedTower of tower.connections) {
+          if (connectedTower.team !== this.team) {
+            // Check if the player is too close to a wall
+            if (this.distanceToLineSegment(tower, connectedTower, {x, y}) < wallThickness + aiSize) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+  distanceToLineSegment(tower1, tower2, point) {
+    const x1 = tower1.x, y1 = tower1.y;
+    const x2 = tower2.x, y2 = tower2.y;
+    const px = point.x, py = point.y;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+
+    const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+
+    const clampedT = Math.max(0, Math.min(1, t));
+
+    const closestX = x1 + clampedT * dx;
+    const closestY = y1 + clampedT * dy;
+
+    return Math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY));
+  }
+
+  distanceTo(object) {
+    return Math.sqrt((this.x - object.x) ** 2 + (this.y - object.y) ** 2);
+  }
+  shoot() {
+    const currentTime = Date.now();
+    if (currentTime - this.lastShotTime >= this.shootingInterval) {
+      const angle = Math.atan2(mouseY - this.y, mouseX - this.x);
+      const ball = {
+        x: this.x,
+        y: this.y,
+        dx: Math.cos(angle) * speed,
+        dy: Math.sin(angle) * speed,
+        team: this.team,
+        life: 300
+      };
+      balls.push(ball);
+      this.lastShotTime = currentTime;
+    }
+  }
+
+  startShooting() {
+    this.isShooting = true;
+  }
+
+  stopShooting() {
+    this.isShooting = false;
+  }
+
+  update() {
+    this.move();
+    if (this.isShooting) {
+      this.shoot();
+    }
+  }
+  
+  distanceTo(object) {
+    return Math.sqrt((this.x - object.x) ** 2 + (this.y - object.y) ** 2);
+  }
+  
+  findNearestTower() {
+    let nearestTower = null;
+    let minDistance = Infinity;
+    for (const tower of towers) {
+      const distance = this.distanceTo(tower);
+      if (distance < minDistance && tower.team == this.team) {
+        minDistance = distance;
+        nearestTower = tower;
+      }
+    }
+    return nearestTower;
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, aiSize, 0, Math.PI * 2);
+    ctx.fillStyle = this.team === 'left' ? "Crimson" : "";
+    ctx.fill();
+    ctx.closePath();
+  }
+}
+
+// Global variables for keys and mouse positions
+const keys = {};
+let mouseX = 0;
+let mouseY = 0;
+
+// Event listeners
+window.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+});
+
+window.addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+});
+
+window.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
+window.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { // Left click
+    humanPlayer.startShooting();
+  }
+  if ((e.button === 2 || evt.keyCode === 32) && humanPlayer.canBuildTower()) { // Right click
+    humanPlayer.buildTower();
+  }
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 0) { // Left click
+    humanPlayer.stopShooting();
+  }
+});
+
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault(); // Prevent context menu on right click
+});
+window.addEventListener('keyup', event => {
+  if (event.code === 'Space') {
+    if (humanPlayer.canBuildTower()) { // Right click
+      humanPlayer.buildTower();
+    }
+  }
+})
+// Instantiate the human player
+const humanPlayer = new HumanPlayer(111, 111, 'left');
+
+    const aiPlayers = [];
+    const towers = [];
+    var player = 4;
+    player = player + 1;
+    // Create AI players for each team
+    for (let i = 0; i < player - 1; i++) {
+      // aiPlayers.push(new AI(canvas.width / player, (i + 1) * canvas.height / player, 'left'));
+      aiPlayers.push(new AI((player - 1) * canvas.width / player, (i + 1) * canvas.height / player, 'right'));
+    }
+      // aiPlayers.push(new AI((7) * canvas.width / player, (7 + 1) * canvas.height / 7, 'right'));
+
+    
+    // Function to reflect the ball when it hits a line
+    function reflectBall(ball, tower1, tower2) {
+      // Wall vector
+      const wallDx = tower2.x - tower1.x;
+      const wallDy = tower2.y - tower1.y;
+      
+      // Normal vector to the wall
+      const wallLength = Math.sqrt(wallDx * wallDx + wallDy * wallDy);
+      const normalX = wallDy / wallLength; // Perpendicular to the wall
+      const normalY = -wallDx / wallLength; // Perpendicular to the wall
+      
+      // Dot product of ball velocity and wall normal
+      const dotProduct = ball.dx * normalX + ball.dy * normalY;
+      
+      // Reflect the velocity
+      ball.dx -= 2 * dotProduct * normalX;
+      ball.dy -= 2 * dotProduct * normalY;
+    }
+    
+    // Update ball logic
+    function updateBalls() {
+      for (let i = 0; i < balls.length; i++) {
+        const ball = balls[i];
+        
+        // Move the ball by its velocity
+
+        // Check for intersection with tower walls
+        for (const tower of towers) {
+          for (const connectedTower of tower.connections) {
+            if (lineCircleIntersection(tower, connectedTower, ball, ballRadius)) {
+              // Reflect the ball instead of removing it
+              reflectBall(ball, tower, connectedTower);
+            }
+          }
+        }
+      }
+    }
+    function updateTowers() {
+      // Create a set of alive towers (those that are still in the towers list)
+      const aliveTowers = new Set(towers);
+      
+      // Iterate through each tower and remove connections to towers not in the aliveTowers set
+      for (const tower of towers) {
+        tower.connections = tower.connections.filter(connectedTower => aliveTowers.has(connectedTower));
+      }
+    }
+
+    function drawBall(x, y, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, ballRadius / 1.3, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function drawWalls() {
+      for (const tower of towers) {
+        for (const connectedTower of tower.connections) {
+          ctx.beginPath();
+          ctx.moveTo(tower.x, tower.y);
+          ctx.lineTo(connectedTower.x, connectedTower.y);
+          ctx.strokeStyle = tower.team === 'left' ? "rgb(255, 72, 55)" : "rgb(53, 89, 229)";
+          ctx.lineWidth = wallThickness;
+          ctx.stroke();
+        }
+      }
+    }
+
+    function handleBallCollisions() {
+      for (let i = balls.length - 1; i >= 0; i--) {
+        const ball = balls[i];
+        
+        // Check for collisions with walls and towers
+        for (let j = towers.length - 1; j >= 0; j--) {
+          const tower = towers[j];
+          if (ball.team !== tower.team) {
+            if (Math.abs(ball.x - tower.x) < towerRadius + ballRadius &&
+                Math.abs(ball.y - tower.y) < towerRadius + ballRadius) {
+              // Remove the tower and disconnect it
+              for (const connectedTower of tower.connections) {
+                connectedTower.disconnect(tower);
+              }
+              towers.splice(j, 1);
+              balls.splice(i, 1);
+              break;
+            }
+
+            // Check for collisions with walls
+            for (const connectedTower of tower.connections) {
+              if (lineCircleIntersection(tower, connectedTower, ball, ballRadius)) {
+                balls.splice(i, 1);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    function lineCircleIntersection(p1, p2, circle, radius) {
+      const v1 = { x: p2.x - p1.x, y: p2.y - p1.y };
+      const v2 = { x: circle.x - p1.x, y: circle.y - p1.y };
+      const u = (v2.x * v1.x + v2.y * v1.y) / (v1.x * v1.x + v1.y * v1.y);
+      
+      if (u >= 0 && u <= 1) {
+        const intersection = {
+          x: p1.x + u * v1.x,
+          y: p1.y + u * v1.y
+        };
+        const distance = Math.sqrt(
+          (intersection.x - circle.x) * (intersection.x - circle.x) +
+          (intersection.y - circle.y) * (intersection.y - circle.y)
+        );
+        return distance <= radius;
+      }
+      return false;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawWalls();
+
+      for (const tower of towers) {
+        tower.draw();
+      }
+for (let i = balls.length - 1; i >= 0; i--) {
+  const ball = balls[i];
+  drawBall(ball.x, ball.y, ball.team === 'left' ? "red" : "blue");
+
+  // Calculate the total velocity
+  const velocity = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+  const decayFactor = 0.999;  // Adjust this value as needed
+  ball.dx *= decayFactor;
+  ball.dy *= decayFactor;
+  ball.x += ball.dx;
+  ball.y += ball.dy;
+  ball.life--;
+  // Update towers (if needed)
+  updateTowers();
+
+  // Remove the ball if it's too slow or out of bounds
+  if ((ball.life<0) || 
+      ball.x < 0 || ball.x > canvas.width || 
+      ball.y < 0 || ball.y > canvas.height) {
+    balls.splice(i, 1);
+  }
+}
+      for (let j = balls.length - 1; j >= 0; j--) {
+        const ball = balls[j];
+        if (ball.team !== humanPlayer.team &&
+            Math.abs(ball.x - humanPlayer.x) < aiSize + ballRadius &&
+            Math.abs(ball.y - humanPlayer.y) < aiSize + ballRadius
+        ) {
+          humanPlayer.alive=false;
+          break;
+        }
+      }
+      handleBallCollisions();
+    if (humanPlayer.alive) {
+      humanPlayer.update();
+      humanPlayer.draw();
+    }
+    for (let i = aiPlayers.length - 1; i >= 0; i--) {
+      const ai = aiPlayers[i];
+      ai.draw();
+      ai.move();
+
+      for (let j = balls.length - 1; j >= 0; j--) {
+        const ball = balls[j];
+        if (ball.team !== ai.team &&
+            Math.abs(ball.x - ai.x) < aiSize + ballRadius &&
+            Math.abs(ball.y - ai.y) < aiSize + ballRadius
+        ) {
+          ai.stopShooting();
+          aiPlayers.splice(i, 1);
+          balls.splice(j, 1);
+          break;
+        }
+      }
+    }
+
+      requestAnimationFrame(draw);
+    }
+
+    const speed = 1.3;
+    const interval = 750;
+    const variation = 1.3;
+
+    function spawnBalls() {
+      aiPlayers.forEach(ai => ai.startShooting());
+    }
+
+    draw();
+    spawnBalls();
+  </script>
+</body>
+</html>
