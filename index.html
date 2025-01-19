@@ -32,7 +32,7 @@
     const aiSize = 9;
     const ballRadius = aiSize-2;
     const aiSpeed = 1.1;
-    const safeDistance = 37;
+    const safeDistance = 53;
     const pressureDistance = safeDistance*3.5;
     const aiAvoidanceDistance = safeDistance;
     const towerRadius = aiSize-0.01;
@@ -255,7 +255,7 @@
       }
       canBuildTower() {
         for (const tower of towers) {
-          if (this.distanceTo({x: tower.x, y: tower.y}) < safeDistance) {
+          if (this.distanceTo({x: tower.x, y: tower.y}) < 37) {
             return false;
           }
         }
@@ -353,27 +353,27 @@ class HumanPlayer {
   move() {
     let dx = 0;
     let dy = 0;
-
+    var playerSpeed = 1.1;
     if (keys["KeyW"] && keys["KeyA"]) {
-      dy -= aiSpeed * Math.sqrt(2) / 2;
-      dx -= aiSpeed * Math.sqrt(2) / 2;
+      dy -= playerSpeed * Math.sqrt(2) / 2;
+      dx -= playerSpeed * Math.sqrt(2) / 2;
     } else if (keys["KeyW"] && keys["KeyD"]) {
-      dy -= aiSpeed * Math.sqrt(2) / 2;
-      dx += aiSpeed * Math.sqrt(2) / 2;
+      dy -= playerSpeed * Math.sqrt(2) / 2;
+      dx += playerSpeed * Math.sqrt(2) / 2;
     } else if (keys["KeyA"] && keys["KeyS"]) {
-      dy += aiSpeed * Math.sqrt(2) / 2;
-      dx -= aiSpeed * Math.sqrt(2) / 2;
+      dy += playerSpeed * Math.sqrt(2) / 2;
+      dx -= playerSpeed * Math.sqrt(2) / 2;
     } else if (keys["KeyS"] && keys["KeyD"]) {
-      dy += aiSpeed * Math.sqrt(2) / 2;
-      dx += aiSpeed * Math.sqrt(2) / 2;
+      dy += playerSpeed * Math.sqrt(2) / 2;
+      dx += playerSpeed * Math.sqrt(2) / 2;
     } else if (keys["KeyW"] || keys["ArrowUp"]) {
-      dy -= aiSpeed;
+      dy -= playerSpeed;
     } else if (keys["KeyS"] || keys["ArrowDown"]) {
-      dy += aiSpeed;
+      dy += playerSpeed;
     } else if (keys["KeyA"] || keys["ArrowLeft"]) {
-      dx -= aiSpeed;
+      dx -= playerSpeed;
     } else if (keys["KeyD"] || keys["ArrowRight"]) {
-      dx += aiSpeed;
+      dx += playerSpeed;
     }
     const nearestTower = this.findNearestTower();
 
@@ -395,7 +395,7 @@ class HumanPlayer {
     }
   canBuildTower() {
     for (const tower of towers) {
-      if (this.distanceTo({x: tower.x, y: tower.y}) < safeDistance) {
+      if (this.distanceTo({x: tower.x, y: tower.y}) < 37) {
         return false;
       }
     }
