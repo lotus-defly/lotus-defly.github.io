@@ -31,10 +31,10 @@
     const balls = [];
     const aiSize = 9;
     const ballRadius = aiSize-2;
-    const aiSpeed = 1.1;
-    const safeDistance = 53;
-    const pressureDistance = safeDistance*3.5;
-    const aiAvoidanceDistance = safeDistance;
+    const aiSpeed = 1.3;
+    const safeDistance = aiSize+ballRadius+(aiSize+ballRadius)/aiSpeed;
+    const pressureDistance = safeDistance*5;
+    const aiAvoidanceDistance = safeDistance*3;
     const towerRadius = aiSize-0.01;
     const wallThickness = towerRadius-0.5;
     const tacticalRetreatDistance = 70;
@@ -353,7 +353,7 @@ class HumanPlayer {
   move() {
     let dx = 0;
     let dy = 0;
-    var playerSpeed = 1.1;
+    var playerSpeed = 1.3;
     if (keys["KeyW"] && keys["KeyA"]) {
       dy -= playerSpeed * Math.sqrt(2) / 2;
       dx -= playerSpeed * Math.sqrt(2) / 2;
@@ -748,7 +748,7 @@ for (let i = balls.length - 1; i >= 0; i--) {
       requestAnimationFrame(draw);
     }
 
-    const speed = 1.3;
+    const speed = 1.5;
     const interval = 750;
     const variation = 1.3;
 
